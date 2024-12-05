@@ -7,9 +7,9 @@ output: pdf_document
 ## Installation
 
 ```{r}
-# The following line causes a compliation issue when knitting, uncomment if you run yourself
-# install.packages('tidyverse')
-# install.packages('dplyr')
+# The following 2 lines causes a compliation issue when knitting, uncomment if you run yourself
+install.packages('tidyverse')
+install.packages('dplyr')
 library(tidyverse)
 library(haven)
 library(dplyr)
@@ -22,7 +22,7 @@ library(dplyr)
 # Outcome Variable: H4ED1 (respondent’s high school graduation status)
 
 # CHANGE THIS TO WHERE YOUR WAVE 4 DATASET IS. THE WAVE 4 FOLDER SHOULD BE NAMED 'Wave4'
-wave4_dir <- "Wave4/"
+wave4_dir <- "./Wave4/"
 
 concat <- function(s1, s2) {
   return (paste(s1, s2, sep=""))
@@ -45,13 +45,15 @@ combined_df <- inhome_df %>%
 
 relevant_df = combined_df %>% 
   filter(H4WP3 <= 1) %>% # Filter out refused or don't know for H4WP3
-  filter(H4ED1 <= 4) %>% # Filter our don't know for H4ED1
+  filter(H4ED1 <= 4) %>% # Filter out don't know for H4ED1
   mutate(H4WP4 = case_when(H4WP4 >= 97 ~ NA, .default = H4WP4),
          H4WP5 = case_when(H4WP5 >= 94 ~ NA, .default = H4WP5),
          H4WP24 = case_when(H4WP24 == 7 ~ NA, .default = H4WP24),
          H4EC1 = case_when(H4EC1 >= 96 ~ NA, .default = H4EC1),
          H4ED7 = case_when(H4ED7 >= 5 ~ NA, .default = H4ED7),
          H4EC7 = case_when(H4EC7 >= 96 ~ NA, .default = H4EC7),
+         H4ED1 = case_when(H4ED1 %in% c(1, 2) ~ 1, # Graduated high school
+                          H4ED1 %in% c(3,4) ~ 0),  # Did not graduate high school, This is dichotomizing the outcome variable 
          H4EO7 = case_when(H4EO7 > 4 ~ NA, .default = H4EO7)) %>% #Change Don't Know/Missing/Refuse values to NA rather than numerical code
   select(H4WP3, H4WP4, H4WP5, H4WP24, H4OD4, H4EC1, H4EC7, H4LM28, H4ED7, H4EO7, BIO_SEX4, H4ED1) 
 
@@ -134,3 +136,44 @@ Visit <https://addhealth.cpc.unc.edu/documentation/codebook-explorer/> for a mor
 **Sex** (BIO_SEX4): Respondent's Gender
 
 **Highschool.Graduated** (H4ED1) [Outcome Variable]: What is your high school graduation status?
+
+Conducting the Matching:
+
+```{r}
+library(MatchIt)
+# treatment formula based off of what the sufficient adjustment set is (those are the variables we include): 
+
+# NOT THIS: treatment_formula<-Mother.Incarcerated~Household.Income+Sex+Household.Assets+Family.Support.Education+Family.Responsibilities+Neighborhood.Safety
+
+treatment_formula2<-Mother.Incarcerated~Household.Income+Neighborhood.Safety
+
+#Perform Matching
+clean_relevant_df<-relevant_df %>% select(-Mother.Incarcerated.Times, -Mother.Incarcerated.Respondent.Age) %>% drop_na()
+
+matching<-matchit(treatment_formula2,
+                  method="nearest", 
+                  distance="glm",
+                  estimand="ATT", 
+                  data=clean_relevant_df)
+matching
+summary(matching)
+summary(matching)$nn
+
+# method="exact" was too redundant and didn't work well with data and had terrible covariate balance because there are way more values in the control group than treated group
+
+table(clean_relevant_df$Mother.Incarcerated, matching$weights)
+
+fit<-lm(Highschool.Graduated~Mother.Incarcerated+Household.Income+Neighborhood.Safety,
+         data=clean_relevant_df,
+         weights=matching$weights)
+fit
+summary(fit)
+```
+
+```{r}
+#Estimate Causal Effect-coefficient on treatment in the linear regression we fit on the matched data
+
+fit$coefficients["Mother.Incarcerated"]
+
+
+```
